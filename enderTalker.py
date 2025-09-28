@@ -42,22 +42,26 @@ class CameraController:
             print(f"Error setting relative mode: {e}")
             return None
     
-    async def send_command(self, command):
-        print("Sending command:", command)
+    async def send_command(self, command, distMultiplier=1.0): #will be command, distMultilmplier)
+        print(f"Sending command: {command} with multiplier: {distMultiplier}")
         """Send a WASD command to move the camera"""
         if not self.websocket or not self.running:
             print("WebSocket not connected")
             return None
         
-        if(command.lower == 'c'):
+        if(command.lower() == 'c'): #found and fixed typo
             return None
+        
+        base_distance = 0.25
+        move_distance = base_distance * distMultiplier #adjusts distance to send, based on the distMuliplier input
+
         # Map commands to G-code movements
         # L X+1, R X-1, U Y+1, D Y-1
         command_map = {
-            "u": {"script": "G1 Y0.25", "description": "Move up"},
-            "d": {"script": "G1 Y-0.25", "description": "Move down"}, 
-            "l": {"script": "G1 X-0.25", "description": "Move left"},
-            "r": {"script": "G1 X0.25", "description": "Move right"}
+            "u": {"script": f"G1 Y{move_distance}", "description": "Move up"},
+            "d": {"script": f"G1 Y-{move_distance}", "description": "Move down"}, 
+            "l": {"script": f"G1 X-{move_distance}", "description": "Move left"},
+            "r": {"script": f"G1 X{move_distance}", "description": "Move right"}
         }
         
         try:
