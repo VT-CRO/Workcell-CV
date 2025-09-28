@@ -3,6 +3,7 @@ import time
 import asyncio
 from pupil_apriltags import Detector
 from enderTalker import CameraController
+import math
 
 Eddie = CameraController()
 
@@ -24,6 +25,7 @@ async def run():
     scale_step_fraction = 0.05
     min_scale = 0.05
     max_scale = 0.9
+    distMultipler = 1
 
     UP_ARROW = 2490368
     DOWN_ARROW = 2621440
@@ -90,7 +92,9 @@ async def run():
                 flush=True,
             )
 
-            await Eddie.send_command(command)
+            distMultipler = target_scale
+
+            await Eddie.send_command(command, distMultipler)
             time.sleep(0.1)
 
             if command_text == "No tag detected":
