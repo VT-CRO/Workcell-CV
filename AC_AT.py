@@ -26,6 +26,8 @@ async def run():
     min_scale = 0.05
     max_scale = 0.9
     distMultipler = 1
+    targetScaleWeight = 0.2 #THIS AND THE LINE BELOW SHOULD ADD TO 1!!!!!!!!!
+    distScaleWeight = 0.8
 
     UP_ARROW = 2490368
     DOWN_ARROW = 2621440
@@ -91,8 +93,14 @@ async def run():
                 f"Tag {d.tag_id}: center=({tag_center_x:.1f}, {tag_center_y:.1f}) command={command}",
                 flush=True,
             )
-
-            distMultipler = target_scale
+            dist = math.dist((tag_center_x,tag_center_y),(center_point))
+            if(dist > 100):
+                distScale = 10
+            elif(dist < 10):
+                distScale = 0.1
+            else:
+                distScale = dist/10
+            distMultipler = (targetScaleWeight * (target_scale * 10)) + (distScaleWeight * distScale)
 
             await Eddie.send_command(command, distMultipler)
             time.sleep(0.1)
