@@ -1,26 +1,36 @@
 import cv2
-import numpy as np
-import robotpy_apriltag as apriltag
+from pupil_apriltags import Detector
 
-# Create detector with default family ("tag36h11" is standard for FRC)
-options = apriltag.DetectorOptions(families="tag36h11")
-detector = apriltag.Detector(options)
+cap = cv2.VideoCapture(0)  # open webcam
+if not cap.isOpened():
+    print("Unable to open webcam")
+    exit()
 
-# Load a grayscale image (from camera or file)
-image = cv2.imread("example.png", cv2.IMREAD_GRAYSCALE)
+detector = Detector(families="tag36h11")  # use correct family
 
-# Run detection
-results = detector.detect(image)
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to grab frame")
+        break
 
-for r in results:
-    print(f"Detected tag {r.tag_id} with corners {r.corners}")
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-# Example camera intrinsics (fx, fy, cx, cy)
-fx, fy = 600, 600
-cx, cy = 320, 240
-tag_size = 0.165  # meters (16.5 cm for FRC tags)
+    detections = detector.detect(gray)
+    print(f"Found {len(detections)} tag(s)")
 
-pose, e0, e1 = detector.detection_pose(results[0], (fx, fy, cx, cy), tag_size)
+    for d in detections:
+        pts = d.corners.astype(int)
+        cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
+        c = tuple(map(int, d.center))
+        cv2.putText(frame, f"id:{d.tag_id}", (c[0] - 20, c[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-print("Rotation matrix:\n", pose[0])
-print("Translation vector:\n", pose[1])
+    cv2.imshow("AprilTag detections", frame)
+
+    # press q to quit
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
