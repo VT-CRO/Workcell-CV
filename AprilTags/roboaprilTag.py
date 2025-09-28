@@ -37,10 +37,14 @@ while True:
 
     for d in detections:
         pts = d.corners.astype(int)
+        tag_id = d.tag_id
+        center_x, center_y = d.center
         cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
         c = tuple(map(int, d.center))
         cv2.putText(frame, f"id:{d.tag_id}", (c[0] - 20, c[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+
 
         # Check if tag center is inside the central region
         if left_bound <= c[0] <= right_bound and top_bound <= c[1] <= bottom_bound:
