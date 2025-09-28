@@ -49,7 +49,7 @@ class CameraController:
             print("WebSocket not connected")
             return None
         
-        if(command.lower == 'c'):
+        if(command.lower() == 'c'): #found and fixed typo
             return None
         
         base_distance = 0.25
