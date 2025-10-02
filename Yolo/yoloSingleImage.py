@@ -14,7 +14,7 @@ LOGGER.addFilter(SuppressDetectionLine())
 # Path to your image in Downloads
 image_path = r"C:\Users\andre\Downloads\spaghetti.jpg"
 
-model = YOLO(r"C:\Users\andre\OneDrive\Documents\Visual Studio Code\CRO\spaghetti.pt")
+model = YOLO(r"C:\Users\andre\OneDrive\Documents\Visual Studio Code\CRO\spaghetti2.pt")
 model.conf = 0.7
 
 # Run detection on the image (use predict here since it's a single frame)
