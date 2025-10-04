@@ -24,12 +24,13 @@ class AutoCalibrator:
     def __init__(
         self,
         camera_index: int = 1,
-        target_scale: float = 0.1,
+        target_scale: float = 1,
         scale_step_fraction: float = 0.05,
         min_scale: float = 0.05,
         max_scale: float = 0.9,
         dist_weight: float = 0.8,
         size_weight: float = 0.2,
+        zHeightStart: int = 175,
     ) -> None:
         self.camera_index = camera_index
         self.target_scale = target_scale
@@ -43,6 +44,7 @@ class AutoCalibrator:
         self.printer = CameraController()
         self._loop = asyncio.new_event_loop()
         self.cap = None
+        self.zHeightStart = zHeightStart
 
         # Key codes from cv2.waitKeyEx for arrow input
         self.UP_ARROW = 2490368
@@ -54,6 +56,8 @@ class AutoCalibrator:
         self.consecutive_center = 0
         self.stage_announced = False
         self.calibration_complete = False
+        self.zHeight = zHeightStart
+        self.zChange = zHeightStart/10 #THIS VALUE IS WHAT THE CONSTANGE CHANGE IS< IF TOO SLOW INCREASE IT
 
     def run(self) -> None:
         if self._loop.is_closed():
@@ -113,7 +117,7 @@ class AutoCalibrator:
             return False
 
     def _initialize_printer_position(self) -> None:
-        self._send_gcode(self.command_assembler.home(), wait_completion=True)
+        #self._send_gcode(self.command_assembler.home(), wait_completion=True)
         self._send_gcode(self.command_assembler.set_relative())
 
     def _send_gcode(self, gcode: str, wait_completion: bool = False) -> None:
@@ -143,7 +147,7 @@ class AutoCalibrator:
 
     def _calculate_target_region(self, frame_shape: Tuple[int, int]) -> TargetRegion:
         frame_height, frame_width = frame_shape
-        target_side = max(1, int(min(frame_width, frame_height) * self.target_scale))
+        target_side = max(1, int(min(frame_width, frame_height) * (self.target_scale/10)))
         half_side = target_side // 2
         center_x = frame_width // 2
         center_y = frame_height // 2
@@ -230,7 +234,8 @@ class AutoCalibrator:
         gcode_line = self.command_assembler.move(command, multiplier)
         if gcode_line:
             self._send_gcode(gcode_line)
-        time.sleep(0.1)
+            print(gcode_line)
+        time.sleep(0.2)
 
     def _handle_command_for_stage(self, command: str) -> None:
         if self.calibration_complete:
@@ -274,12 +279,31 @@ class AutoCalibrator:
             self.target_scale = max(self.target_scale * (1 - self.scale_step_fraction), self.min_scale)
         return True
 
+
+    #OLD CONSTANT Z CHANGER
+    # def _ensure_stage_announced(self) -> None:
+    #     if self.stage_announced:
+    #         return
+    #     stage = self.calibration_stages[self.stage_index]
+    #     self._send_gcode(self.command_assembler.set_absolute())
+    #     self._send_gcode(self.command_assembler.zoom_in(stage), wait_completion=True)
+    #     self._send_gcode(self.command_assembler.set_relative())
+    #     if stage == "calibrated":
+    #         self.calibration_complete = True
+    #         self.stage_announced = True
+    #         return
+    #     if stage != "S1":
+    #         self.target_scale = max(self.target_scale * 0.5, self.min_scale)
+    #     self.consecutive_center = 0
+    #     self.stage_announced = True
+
     def _ensure_stage_announced(self) -> None:
         if self.stage_announced:
             return
         stage = self.calibration_stages[self.stage_index]
         self._send_gcode(self.command_assembler.set_absolute())
-        self._send_gcode(self.command_assembler.zoom_in(stage), wait_completion=True)
+        #print(self.zHeight)
+        self._send_gcode(self.command_assembler.zoom_in(self.zHeight), wait_completion=True)
         self._send_gcode(self.command_assembler.set_relative())
         if stage == "calibrated":
             self.calibration_complete = True
@@ -291,14 +315,25 @@ class AutoCalibrator:
         self.stage_announced = True
 
     def _advance_stage(self) -> None:
-        if self.stage_index < len(self.calibration_stages) - 1:
-            self.stage_index += 1
-            self.stage_announced = False
-            self.consecutive_center = 0
-            if self.calibration_stages[self.stage_index] == "calibrated":
-                self.calibration_complete = True
-        else:
+        self.zHeight -= self.zChange
+        self.zChange = (self.zHeight+70)/10
+        self.target_scale = (((100/self.zHeightStart) * (self.zHeight)) + 25)/100
+        print(self.target_scale)
+        self.stage_announced = False
+        self.consecutive_center = 0
+        if(self.zHeight <= (self.zChange - 1)):
             self.calibration_complete = True
+
+    #OLD CODE
+    # def _advance_stage(self) -> None:
+    #     if self.stage_index < len(self.calibration_stages) - 1:
+    #         self.stage_index += 1
+    #         self.stage_announced = False
+    #         self.consecutive_center = 0
+    #         if self.calibration_stages[self.stage_index] == "calibrated":
+    #             self.calibration_complete = True
+    #     else:
+    #         self.calibration_complete = True
 
 
 def main() -> None:

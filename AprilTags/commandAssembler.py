@@ -38,20 +38,38 @@ class CommandAssembler:
         line = f"G1 {axis}{self._fmt_float(move_distance)}"
         return self._append_line(line)
 
-    def zoom_in(self, stage: str) -> str:
+
+    # THIS IS THE OLD WORKING CONSTANT ONE, THE ONE BELOW IS CONSTANT Z LOWERING
+    # def zoom_in(self, stage: str) -> str:
+    #     calibrateStage = {"S1": 175, "S2": 100, "S3": 25, "calibrated": 0}
+    #     stage_key = stage.strip() if stage is not None else ""
+    #     if stage_key not in calibrateStage:
+    #         upper_key = stage_key.upper()
+    #         lower_key = stage_key.lower()
+    #         if upper_key in calibrateStage:
+    #             stage_key = upper_key
+    #         elif lower_key in calibrateStage:
+    #             stage_key = lower_key
+    #         else:
+    #             raise ValueError(f"Unsupported calibration stage: {stage}")
+    #     z_value = calibrateStage[stage_key]
+    #     line = f"G1 Z{self._fmt_float(z_value)}"
+    #     return self._append_line(line)
+
+    def zoom_in(self, height: int) -> int:
         calibrateStage = {"S1": 175, "S2": 100, "S3": 25, "calibrated": 0}
-        stage_key = stage.strip() if stage is not None else ""
-        if stage_key not in calibrateStage:
-            upper_key = stage_key.upper()
-            lower_key = stage_key.lower()
-            if upper_key in calibrateStage:
-                stage_key = upper_key
-            elif lower_key in calibrateStage:
-                stage_key = lower_key
-            else:
-                raise ValueError(f"Unsupported calibration stage: {stage}")
-        z_value = calibrateStage[stage_key]
-        line = f"G1 Z{self._fmt_float(z_value)}"
+        #stage_key = stage.strip() if stage is not None else ""
+        # if stage_key not in calibrateStage:
+        #     upper_key = stage_key.upper()
+        #     lower_key = stage_key.lower()
+        #     if upper_key in calibrateStage:
+        #         stage_key = upper_key
+        #     elif lower_key in calibrateStage:
+        #         stage_key = lower_key
+        #     else:
+        #         raise ValueError(f"Unsupported calibration stage: {height}")
+        # z_value = calibrateStage[stage_key]
+        line = f"G1 Z{self._fmt_float(height)}"
         return self._append_line(line)
 
     def get_program(self) -> str:
