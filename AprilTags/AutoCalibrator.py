@@ -233,7 +233,7 @@ class AutoCalibrator:
     def _emit_command(self, command: str, multiplier: float) -> None:
         gcode_line = self.command_assembler.move(command, multiplier)
         if gcode_line:
-            self._send_gcode(gcode_line)
+            self._send_gcode(gcode_line, wait_completion=True)
             print(gcode_line)
         time.sleep(0.2)
 
@@ -317,7 +317,7 @@ class AutoCalibrator:
     def _advance_stage(self) -> None:
         self.zHeight -= self.zChange
         self.zChange = (self.zHeight+70)/10
-        self.target_scale = (((100/self.zHeightStart) * (self.zHeight)) + 25)/100
+        self.target_scale = (((100/self.zHeightStart) * (self.zHeight)) + 10)/100
         print(self.target_scale)
         self.stage_announced = False
         self.consecutive_center = 0
