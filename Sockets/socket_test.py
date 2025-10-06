@@ -6,6 +6,8 @@ import errno
 
 # Klipper module for socket communication. Running START_COMMS will enable the printer to start listening. Should be nonblocking
 
+# While moving, the printer will ignore for all commands until the movement is complete
+
 class socket_test:
     def __init__(self, config):
         self.printer = config.get_printer()
@@ -55,12 +57,11 @@ class socket_test:
     def _tick(self, eventtime):
         self._drain_socket(self.camera_loop_srv)
         if self.current_command is not None:
-            self.gcode.run_script_from_command(self.current_command)
-            self.current_command = None
-            # Reschedule for next check
-            return self.reactor.monotonic() + 0.2
+            if self._toolhead_is_busy(eventtime):
+                self.gcode.run_script_from_command(self.current_command)
+                self.current_command = None
+            return self.reactor.monotonic() + 0.1
         else:
-            # No data, check less frequently
             return self.reactor.monotonic() + 1
         
         
@@ -94,6 +95,15 @@ class socket_test:
         else:
             self.gcode.respond_info(f"[Test] Socket was already off")
         self.current_command = None
+            
+    def _toolhead_is_busy(self, eventtime):
+        toolhead = self.printer.lookup_object('toolhead')
+        print_time, est_print_time, lookahead_empty = toolhead.check_busy(eventtime)
+        idle_time = est_print_time - print_time
+        if lookahead_empty and idle_time > 0.05:
+            return True
+        else:
+            return False
         
 def load_config(config):
     return socket_test(config)
