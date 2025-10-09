@@ -72,6 +72,14 @@ class CommandAssembler:
         line = f"G1 Z{self._fmt_float(height)}"
         return self._append_line(line)
 
+    def set_x(self, x: int) -> int:
+        line = f"G1 X{self._fmt_float(x)}"
+        return self._append_line(line)
+
+    def set_y(self, y: int) -> int:
+        line = f"G1 Y{self._fmt_float(y)}"
+        return self._append_line(line)
+
     def get_program(self) -> str:
         return "\n".join(self._buffer)
 
