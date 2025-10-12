@@ -321,14 +321,18 @@ class AutoCalibrator:
                 self.xMoveDirectionPositive = False
                 print(self.xMoveDirectionPositive)
                 self._change_y_span()
-            self.xLoc = self.xLoc + self.incramentalMove
+                self.xLoc = self.xLoc - self.incramentalMove
+            else:
+                self.xLoc = self.xLoc + self.incramentalMove
             self._send_gcode(self.command_assembler.set_x(self.xLoc), wait_completion=True)
         else:
             if((self.xLoc - self.incramentalMove) >= 0):
                 self.xMoveDirectionPositive = True
                 print(self.xMoveDirectionPositive)
                 self._change_y_span()
-            self.xLoc = self.xLoc - self.incramentalMove
+                self.xLoc = self.xLoc + self.incramentalMove
+            else:
+                self.xLoc = self.xLoc - self.incramentalMove
             self._send_gcode(self.command_assembler.set_x(self.xLoc), wait_completion=True)
             
         self._send_gcode(self.command_assembler.set_relative())
@@ -339,13 +343,17 @@ class AutoCalibrator:
             if(((self.yLoc + self.incramentalMove) >= self.maxLatandLonMove)):
                 self.yMoveDirectionPositive = False
                 print(self.yMoveDirectionPositive)
-            self.yLoc = self.yLoc + self.incramentalMove
+                self.yLoc = self.yLoc - self.incramentalMove
+            else:
+                self.yLoc = self.yLoc + self.incramentalMove
             self._send_gcode(self.command_assembler.set_y(self.yLoc), wait_completion=True)
         else:
             if((self.yLoc - self.incramentalMove) >= 0):
                 self.yMoveDirectionPositive = True
                 print(self.yMoveDirectionPositive)
-            self.yLoc = self.yLoc - self.incramentalMove
+                self.yLoc = self.yLoc + self.incramentalMove
+            else:
+                self.yLoc = self.yLoc - self.incramentalMove
             self._send_gcode(self.command_assembler.set_y(self.yLoc), wait_completion=True)
         self._send_gcode(self.command_assembler.set_relative())
 
