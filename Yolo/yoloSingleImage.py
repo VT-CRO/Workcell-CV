@@ -12,10 +12,11 @@ LOGGER.addFilter(SuppressDetectionLine())
 # ------------------------------------------------------------
 
 # Path to your image in Downloads
-image_path = r"C:\Users\andre\Downloads\spaghetti.jpg"
-
-model = YOLO(r"C:\Users\andre\OneDrive\Documents\Visual Studio Code\CRO\spaghetti2.pt")
-model.conf = 0.7
+image_path = r"C:\Users\xxsci\OneDrive\Documents\forVTCRO\Workcell-CV\Workcell-CV\YOLO\FailedImages\172631_mc5dj6xk7.png"
+# if you want to test this, replace the "C:\Users\xxsci\OneDrive\Documents\forVTCRO" with wherever you put your repo
+model = YOLO(r"C:\Users\xxsci\OneDrive\Documents\forVTCRO\Workcell-CV\Workcell-CV\YOLO\TrainedModles\dataset3_yolo11.pt")
+model.conf = 0.7 #model confidence
+#right so try using an earlier Yolo version or to train from Ultralytics DO THIS DO THIS
 
 # Run detection on the image (use predict here since it's a single frame)
 results = model.predict(source=image_path, conf=0.7, stream=True)
