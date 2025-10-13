@@ -74,6 +74,7 @@ class CommandAssembler:
 
     def set_x(self, x: int) -> int:
         line = f"G1 X{self._fmt_float(x)}"
+        #print(line)
         return self._append_line(line)
 
     def set_y(self, y: int) -> int:
