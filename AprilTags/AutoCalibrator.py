@@ -4,6 +4,8 @@ import time
 import math
 from dataclasses import dataclass
 from typing import Tuple
+from pathlib import Path
+import re
 
 from commandAssembler import CommandAssembler
 from enderTalker import CameraController
@@ -35,7 +37,7 @@ class AutoCalibrator:
         incramentalMove: int = 30,
         initalXandYLoc: int = 15, #This is where the gantry will start on the bed
         filename: str = "waypoints.txt",
-        goalTag: int = 5,
+        goalTag: int = 3,
     ) -> None:
         self.camera_index = camera_index
         self.target_scale = target_scale
@@ -57,7 +59,8 @@ class AutoCalibrator:
         self.filename = filename
         self.tag_id = 0
         self.goalTag = goalTag
-
+        base = Path(__file__).resolve().parent
+        self.filepath = base / "assets" / filename
 
         # Key codes from cv2.waitKeyEx for arrow input
         self.UP_ARROW = 2490368
@@ -70,9 +73,12 @@ class AutoCalibrator:
         self.stage_announced = False
         self.calibration_complete = False
         self.zHeight = zHeightStart
-        self.xLoc = initalXandYLoc
-        self.yLoc = initalXandYLoc
-        self.zChange = zHeightStart/10 #THIS VALUE IS WHAT THE CONSTANGE CHANGE IS< IF TOO SLOW INCREASE IT
+        self.xIncLoc = initalXandYLoc
+        self.yIncLoc = initalXandYLoc
+        self.zChange = zHeightStart/10 #THIS VALUE IS WHAT THE CONSTANGE CHANGE IS - IF TOO SLOW INCREASE IT
+        self.yLoc = 0
+        self.xLoc = 0
+        self.latestDist = 1
 
     def run(self) -> None:
         if self._loop.is_closed():
@@ -137,6 +143,15 @@ class AutoCalibrator:
     def _initialize_printer_position(self) -> None:
         #self._send_gcode(self.command_assembler.home(), wait_completion=True)
         self._send_gcode(self.command_assembler.set_absolute())
+        saved = self.read_markers()
+        for line in saved:
+            name, x, y = line.split(',')
+            print(line)
+            if int(name) == self.goalTag:
+                self.xLoc = int(x)
+                self.yLoc = int(y)
+        print(self.xLoc)
+        print(self.yLoc)
         self._send_gcode(self.command_assembler.set_x(self.xLoc), wait_completion=True)
         self._send_gcode(self.command_assembler.set_y(self.yLoc), wait_completion=True)
         self._send_gcode(self.command_assembler.set_relative())
@@ -201,9 +216,11 @@ class AutoCalibrator:
                 (0, 255, 0),
                 2,
             )
-            
-            command = self._determine_command(tag_center_x, tag_center_y, region)
+
+
             multiplier = self._compute_distance_multiplier(pts, center_point, region)
+            command = self._determine_command(tag_center_x, tag_center_y, region)
+            
 
             self._emit_command(command, multiplier)
             self._handle_command_for_stage(command)
@@ -216,48 +233,52 @@ class AutoCalibrator:
         return command_label
 
     def read_markers(self):
-        markers = {}
-        with open(self.filename, 'r') as f:
+        markers = []
+        with open(self.filepath, 'r') as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue  # skip empty lines
-                name, x, y = line.split(',')
-                markers[name] = (float(x), float(y))
+                markers.append(line)
         return markers
 
 
     def update_line(self, marker_name, new_x, new_y):
-        with open(self.filename, 'r') as f:
+        with open(self.filepath, 'r') as f:
             lines = f.readlines()
 
-        with open(self.filename, 'w') as f:
+        with open(self.filepath, 'w') as f:
             for line in lines:
-                if line.startswith(marker_name + ','):
+                if line.startswith(str(self.goalTag) + ','):
                     # Replace this line with the new data
-                    f.write(f"{marker_name},{new_x},{new_y}\n")
+                    f.write(f"{str(self.goalTag)},{str(new_x)},{str(new_y)}\n")
                 else:
                     f.write(line)      
 
 
     def _determine_command(self, tag_center_x: float, tag_center_y: float, region: TargetRegion) -> str:
+        
         vertical_distance = 0
         vertical_command = ""
         if tag_center_y < region.top:
             vertical_distance = region.top - tag_center_y
             vertical_command = "U"
+            self.yLoc = self.yLoc + self.latestDist
         elif tag_center_y > region.bottom:
             vertical_distance = tag_center_y - region.bottom
             vertical_command = "D"
+            self.yLoc = self.yLoc - self.latestDist
 
         horizontal_distance = 0
         horizontal_command = ""
         if tag_center_x < region.left:
             horizontal_distance = region.left - tag_center_x
             horizontal_command = "L"
+            self.xLoc = self.xLoc - self.latestDist
         elif tag_center_x > region.right:
             horizontal_distance = tag_center_x - region.right
             horizontal_command = "R"
+            self.xLoc = self.xLoc + self.latestDist
 
         if vertical_distance == 0 and horizontal_distance == 0:
             return "C"
@@ -277,6 +298,7 @@ class AutoCalibrator:
             dist_scale = dist_tag_center / 50
 
         multiplier = (dist_scale * self.dist_weight) + ((1 - (tag_size / 200)) * self.size_weight)
+        self.latestDist = max(multiplier, 0.5)
         return max(multiplier, 0.5)
 
     def _emit_command(self, command: str, multiplier: float) -> None:
@@ -351,47 +373,47 @@ class AutoCalibrator:
                 
                 
         if(self.xMoveDirectionPositive):
-            if(((self.xLoc + self.incramentalMove) >= self.maxLatandLonMove)):
+            if(((self.xIncLoc + self.incramentalMove) >= self.maxLatandLonMove)):
                 self.xMoveDirectionPositive = False
                 print(self.xMoveDirectionPositive)
                 self._change_y_span()
-                self.xLoc = self.xLoc - self.incramentalMove
+                self.xIncLoc = self.xIncLoc - self.incramentalMove
             else:
-                self.xLoc = self.xLoc + self.incramentalMove
-            print(self.xLoc)
-            self._send_gcode(self.command_assembler.set_x(self.xLoc), wait_completion=True)
+                self.xIncLoc = self.xIncLoc + self.incramentalMove
+            print(self.xIncLoc)
+            self._send_gcode(self.command_assembler.set_x(self.xIncLoc), wait_completion=True)
         else:
-            if((self.xLoc - self.incramentalMove) <= 0):
+            if((self.xIncLoc - self.incramentalMove) <= 0):
                 self.xMoveDirectionPositive = True
                 print(self.xMoveDirectionPositive)
                 self._change_y_span()
-                self.xLoc = self.xLoc + self.incramentalMove
+                self.xIncLoc = self.xIncLoc + self.incramentalMove
             else:
-                self.xLoc = self.xLoc - self.incramentalMove
+                self.xIncLoc = self.xIncLoc - self.incramentalMove
             
-            print(self.xLoc)
-            self._send_gcode(self.command_assembler.set_x(self.xLoc), wait_completion=True)
+            print(self.xIncLoc)
+            self._send_gcode(self.command_assembler.set_x(self.xIncLoc), wait_completion=True)
             
         self._send_gcode(self.command_assembler.set_relative())
                 
     def _change_y_span(self):
         self._send_gcode(self.command_assembler.set_absolute())
         if(self.yMoveDirectionPositive):
-            if(((self.yLoc + self.incramentalMove) >= self.maxLatandLonMove)):
+            if(((self.yIncLoc + self.incramentalMove) >= self.maxLatandLonMove)):
                 self.yMoveDirectionPositive = False
                 print(self.yMoveDirectionPositive)
-                self.yLoc = self.yLoc - self.incramentalMove
+                self.yIncLoc = self.yIncLoc - self.incramentalMove
             else:
-                self.yLoc = self.yLoc + self.incramentalMove
-            self._send_gcode(self.command_assembler.set_y(self.yLoc), wait_completion=True)
+                self.yIncLoc = self.yIncLoc + self.incramentalMove
+            self._send_gcode(self.command_assembler.set_y(self.yIncLoc), wait_completion=True)
         else:
-            if((self.yLoc - self.incramentalMove) <= 0):
+            if((self.yIncLoc - self.incramentalMove) <= 0):
                 self.yMoveDirectionPositive = True
                 print(self.yMoveDirectionPositive)
-                self.yLoc = self.yLoc + self.incramentalMove
+                self.yIncLoc = self.yIncLoc + self.incramentalMove
             else:
-                self.yLoc = self.yLoc - self.incramentalMove
-            self._send_gcode(self.command_assembler.set_y(self.yLoc), wait_completion=True)
+                self.yIncLoc = self.yIncLoc - self.incramentalMove
+            self._send_gcode(self.command_assembler.set_y(self.yIncLoc), wait_completion=True)
         self._send_gcode(self.command_assembler.set_relative())
 
     def _ensure_stage_announced(self) -> None:
@@ -420,6 +442,8 @@ class AutoCalibrator:
         self.consecutive_center = 0
         if(self.zHeight <= (self.zChange - 1)):
             self.calibration_complete = True
+            self.update_line(self.tag_id, self.xLoc, self.yLoc)
+
 
     #OLD CODE
     # def _advance_stage(self) -> None:
