@@ -1,16 +1,24 @@
 import cv2
 import time
 import math
+import json
 from dataclasses import dataclass
 from typing import Tuple
 from pathlib import Path
 import re
+import requests
+import numpy as np
 
-from Sockets.socket_communicator import PrinterConnection
+# from Sockets.socket_communicator import PrinterConnection
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from klipper_comms import KlipperComms
 from commandAssembler import CommandAssembler
+
 # from enderTalker import CameraController
 from pupil_apriltags import Detector
-
 
 
 @dataclass
@@ -36,8 +44,8 @@ class AutoCalibrator:
         zHeightStart: int = 115,
         maxLatandLonMove: int = 220,
         incramentalMove: int = 30,
-        initalXandYLoc: int = 15, #This is where the gantry will start on the bed
-        filename: str = "waypoints.txt",
+        initalXandYLoc: int = 15,  # This is where the gantry will start on the bed
+        filename: str = "waypoints.json",
         goalTag: int = 3,
     ) -> None:
         self.camera_index = camera_index
@@ -49,11 +57,15 @@ class AutoCalibrator:
         self.size_weight = size_weight
         self.detector = Detector(families="tag36h11")
         self.command_assembler = CommandAssembler()
-        #self.printer = CameraController() - removing old enderTalker
+        # self.printer = CameraController() - removing old enderTalker
         self.cap = None
         self.zHeightStart = zHeightStart
-        self.maxLatandLonMove = maxLatandLonMove #most the gantry cna move in the x and y directions
-        self.incramentalMove = incramentalMove #how much the gantry can move each time.
+        self.maxLatandLonMove = (
+            maxLatandLonMove  # most the gantry cna move in the x and y directions
+        )
+        self.incramentalMove = (
+            incramentalMove  # how much the gantry can move each time.
+        )
         self.xMoveDirectionPositive = True
         self.yMoveDirectionPositive = True
         self.filename = filename
@@ -75,11 +87,13 @@ class AutoCalibrator:
         self.zHeight = zHeightStart
         self.xIncLoc = initalXandYLoc
         self.yIncLoc = initalXandYLoc
-        self.zChange = zHeightStart/10 #THIS VALUE IS WHAT THE CONSTANGE CHANGE IS - IF TOO SLOW INCREASE IT
+        self.zChange = (
+            zHeightStart / 10
+        )  # THIS VALUE IS WHAT THE CONSTANGE CHANGE IS - IF TOO SLOW INCREASE IT
         self.yLoc = 0
         self.xLoc = 0
         self.latestDist = 1
-        self.communicator = PrinterConnection()
+        self.communicator = KlipperComms()
 
     def run(self) -> None:
         # if not self._ensure_printer_connected():
@@ -88,14 +102,14 @@ class AutoCalibrator:
 
         self._initialize_printer_position()
 
-        self.cap = self._open_camera()
+        # self.cap = self._open_camera()
         try:
             while True:
                 self._ensure_stage_announced()
                 if self.calibration_complete:
                     break
 
-                ret, frame = self.cap.read()
+                ret, frame = self._get_frame("http://localhost/webcam/?action=snapshot")
                 if not ret:
                     print("Failed to grab frame")
                     break
@@ -107,7 +121,7 @@ class AutoCalibrator:
                 # self._draw_target_region(frame, region)
 
                 command_label = self._process_detections(frame, detections, region)
-                if(command_label == "No tag detected"):
+                if command_label == "No tag detected":
                     self._change_x_span()
 
                 if self.calibration_complete:
@@ -138,12 +152,14 @@ class AutoCalibrator:
             return False
 
     def _initialize_printer_position(self) -> None:
-        #self._send_gcode(self.command_assembler.home(), wait_completion=True)
+        # self._send_gcode(self.command_assembler.home(), wait_completion=True)
         self._send_gcode(self.command_assembler.set_absolute())
         saved = self.read_markers()
-        for line in saved:
-            name, x, y = line.split(',')
-            print(line)
+        for marker_id, coords in saved.items():
+            name = marker_id
+            x = coords["x"]
+            y = coords["y"]
+            print(f"{name}: x={x}, y={y}")
             if int(name) == self.goalTag:
                 self.xLoc = int(float(x))
                 self.yLoc = int(float(y))
@@ -152,9 +168,9 @@ class AutoCalibrator:
         print(self.xLoc)
         print(self.yLoc)
         self._send_gcode(self.command_assembler.set_x(self.xLoc), wait_completion=True)
-        #print("x")
+        # print("x")
         self._send_gcode(self.command_assembler.set_y(self.yLoc), wait_completion=True)
-        #print("y")
+        # print("y")
         # REMOVED: self._send_gcode(self.command_assembler.set_relative())
 
     # def _send_gcode(self, gcode: str, wait_completion: bool = False) -> None:
@@ -165,20 +181,29 @@ class AutoCalibrator:
     #         self._run_async(self.printer.send_gcode(script)) # Changed to socket communication
     #     except Exception as exc:
     #         print(f"Failed to send G-code '{gcode}': {exc}")
-    
+
     def _send_gcode(self, gcode: str, wait_completion: bool = False):
-        self.tag_id = self.communicator.send_command(gcode)
+        while not self.communicator.get_needCommand():
+            time.sleep(0.1)
+        self.communicator.sendCommand(gcode)
 
     def _cleanup_printer(self) -> None:
-        self.communicator.send_command("DONE")
-        # if self._loop.is_closed():
-        #     return
-        # if self.printer.running:
-        #     try:
-        #         self._run_async(self.printer.disconnect())
-        #     except Exception as exc:
-        #         print(f"Printer disconnect failed: {exc}")
-        # self._loop.close()
+        self.communicator.sendCommand("DONE")
+        self.update_line(self.tag_id, self.xLoc, self.yLoc)
+        self.calibration_stages = ["S1", "S2", "S3", "calibrated"]
+        self.stage_index = 0
+        self.consecutive_center = 0
+        self.stage_announced = False
+        self.calibration_complete = False
+        self.zHeight = 115
+        self.xIncLoc = 15
+        self.yIncLoc = 15
+        self.zChange = (
+            115 / 10
+        )  # THIS VALUE IS WHAT THE CONSTANGE CHANGE IS - IF TOO SLOW INCREASE IT
+        self.yLoc = 0
+        self.xLoc = 0
+        self.latestDist = 1
 
     def _open_camera(self) -> cv2.VideoCapture:
         cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
@@ -188,7 +213,9 @@ class AutoCalibrator:
 
     def _calculate_target_region(self, frame_shape: Tuple[int, int]) -> TargetRegion:
         frame_height, frame_width = frame_shape
-        target_side = max(1, int(min(frame_width, frame_height) * (self.target_scale/10)))
+        target_side = max(
+            1, int(min(frame_width, frame_height) * (self.target_scale / 10))
+        )
         half_side = target_side // 2
         center_x = frame_width // 2
         center_y = frame_height // 2
@@ -196,17 +223,30 @@ class AutoCalibrator:
         bottom = min(frame_height, center_y + half_side)
         left = max(0, center_x - half_side)
         right = min(frame_width, center_x + half_side)
-        return TargetRegion(top=top, bottom=bottom, left=left, right=right, center_x=center_x, center_y=center_y)
+        return TargetRegion(
+            top=top,
+            bottom=bottom,
+            left=left,
+            right=right,
+            center_x=center_x,
+            center_y=center_y,
+        )
 
     def _draw_target_region(self, frame, region: TargetRegion) -> None:
-        cv2.rectangle(frame, (region.left, region.top), (region.right, region.bottom), (0, 0, 255), 2)
+        cv2.rectangle(
+            frame,
+            (region.left, region.top),
+            (region.right, region.bottom),
+            (0, 0, 255),
+            2,
+        )
 
     def _process_detections(self, frame, detections, region: TargetRegion) -> str:
         command_label = "No tag detected"
         for detection in detections:
             pts = detection.corners.astype(int)
             tag_center_x, tag_center_y = detection.center
-            tag_id = int(detection.tag_id)          # <-- get the AprilTag ID
+            tag_id = int(detection.tag_id)  # <-- get the AprilTag ID
             print(tag_id)
 
             # cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
@@ -222,14 +262,12 @@ class AutoCalibrator:
             #     2,
             # )
 
-
             multiplier = self._compute_distance_multiplier(pts, center_point, region)
             command = self._determine_command(tag_center_x, tag_center_y, region)
-            
 
             self._emit_command(command, multiplier)
             self._handle_command_for_stage(command)
-            if(tag_id == self.goalTag):
+            if tag_id == self.goalTag:
                 command_label = f"Cmd: {command}"
 
             if self.calibration_complete:
@@ -238,31 +276,24 @@ class AutoCalibrator:
         return command_label
 
     def read_markers(self):
-        markers = []
-        with open(self.filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue  # skip empty lines
-                markers.append(line)
-        return markers
-
+        with open(self.filepath, "r") as f:
+            data = json.load(f)
+        return data
 
     def update_line(self, marker_name, new_x, new_y):
-        with open(self.filepath, 'r') as f:
-            lines = f.readlines()
+        with open(self.filepath, "r") as f:
+            data = json.load(f)
 
-        with open(self.filepath, 'w') as f:
-            for line in lines:
-                if line.startswith(str(self.goalTag) + ','):
-                    # Replace this line with the new data
-                    f.write(f"{str(self.goalTag)},{str(new_x)},{str(new_y)}\n")
-                else:
-                    f.write(line)      
+        # Update the specific marker
+        data[str(self.goalTag)] = {"x": new_x, "y": new_y}
 
+        with open(self.filepath, "w") as f:
+            json.dump(data, f, indent=4)
 
-    def _determine_command(self, tag_center_x: float, tag_center_y: float, region: TargetRegion) -> str:
-        
+    def _determine_command(
+        self, tag_center_x: float, tag_center_y: float, region: TargetRegion
+    ) -> str:
+
         vertical_distance = 0
         vertical_command = ""
         if tag_center_y < region.top:
@@ -295,7 +326,9 @@ class AutoCalibrator:
             return vertical_command
         return horizontal_command or vertical_command or "C"
 
-    def _compute_distance_multiplier(self, pts, center_point, region: TargetRegion) -> float:
+    def _compute_distance_multiplier(
+        self, pts, center_point, region: TargetRegion
+    ) -> float:
         dist_tag_center = math.dist((region.center_x, region.center_y), center_point)
         tag_size = math.dist((pts[0][0], pts[0][1]), (pts[2][0], pts[2][1]))
 
@@ -306,7 +339,9 @@ class AutoCalibrator:
         else:
             dist_scale = dist_tag_center / 50
 
-        multiplier = (dist_scale * self.dist_weight) + ((1 - (tag_size / 200)) * self.size_weight)
+        multiplier = (dist_scale * self.dist_weight) + (
+            (1 - (tag_size / 200)) * self.size_weight
+        )
         self.latestDist = max(multiplier, 0.5)
         return max(multiplier, 0.5)
 
@@ -368,13 +403,16 @@ class AutoCalibrator:
         if key == ord("q"):
             return False
         if key == self.UP_ARROW:
-            self.target_scale = min(self.target_scale * (1 + self.scale_step_fraction), self.max_scale)
+            self.target_scale = min(
+                self.target_scale * (1 + self.scale_step_fraction), self.max_scale
+            )
         elif key == self.DOWN_ARROW:
-            self.target_scale = max(self.target_scale * (1 - self.scale_step_fraction), self.min_scale)
+            self.target_scale = max(
+                self.target_scale * (1 - self.scale_step_fraction), self.min_scale
+            )
         return True
 
-
-    #OLD CONSTANT Z CHANGER
+    # OLD CONSTANT Z CHANGER
     # def _ensure_stage_announced(self) -> None:
     #     if self.stage_announced:
     #         return
@@ -390,14 +428,14 @@ class AutoCalibrator:
     #         self.target_scale = max(self.target_scale * 0.5, self.min_scale)
     #     self.consecutive_center = 0
     #     self.stage_announced = True
-    
+
     def _change_x_span(self):
         self._send_gcode(self.command_assembler.set_absolute())
         self._send_gcode(self.command_assembler.set_absolute())
         self._send_gcode(self.command_assembler.set_absolute())
-                
-        if(self.xMoveDirectionPositive):
-            if(((self.xIncLoc + self.incramentalMove) >= self.maxLatandLonMove)):
+
+        if self.xMoveDirectionPositive:
+            if (self.xIncLoc + self.incramentalMove) >= self.maxLatandLonMove:
                 self.xMoveDirectionPositive = False
                 print(self.xMoveDirectionPositive)
                 self._change_y_span()
@@ -407,9 +445,11 @@ class AutoCalibrator:
                 self.xIncLoc = self.xIncLoc + self.incramentalMove
                 self.xLoc = self.xIncLoc
             print(self.xIncLoc)
-            self._send_gcode(self.command_assembler.set_x(self.xIncLoc), wait_completion=True)
+            self._send_gcode(
+                self.command_assembler.set_x(self.xIncLoc), wait_completion=True
+            )
         else:
-            if((self.xIncLoc - self.incramentalMove) <= 0):
+            if (self.xIncLoc - self.incramentalMove) <= 0:
                 self.xMoveDirectionPositive = True
                 print(self.xMoveDirectionPositive)
                 self._change_y_span()
@@ -418,17 +458,19 @@ class AutoCalibrator:
             else:
                 self.xIncLoc = self.xIncLoc - self.incramentalMove
                 self.xLoc = self.xIncLoc
-            
+
             print(self.xIncLoc)
-            self._send_gcode(self.command_assembler.set_x(self.xIncLoc), wait_completion=True)
-            
+            self._send_gcode(
+                self.command_assembler.set_x(self.xIncLoc), wait_completion=True
+            )
+
         # REMOVED: self._send_gcode(self.command_assembler.set_relative())
-                
+
     def _change_y_span(self):
         self._send_gcode(self.command_assembler.set_absolute())
         self._send_gcode(self.command_assembler.set_absolute())
-        if(self.yMoveDirectionPositive):
-            if(((self.yIncLoc + self.incramentalMove) >= self.maxLatandLonMove)):
+        if self.yMoveDirectionPositive:
+            if (self.yIncLoc + self.incramentalMove) >= self.maxLatandLonMove:
                 self.yMoveDirectionPositive = False
                 print(self.yMoveDirectionPositive)
                 self.yIncLoc = self.yIncLoc - self.incramentalMove
@@ -436,9 +478,11 @@ class AutoCalibrator:
             else:
                 self.yIncLoc = self.yIncLoc + self.incramentalMove
                 self.yLoc = self.yIncLoc
-            self._send_gcode(self.command_assembler.set_y(self.yIncLoc), wait_completion=True)
+            self._send_gcode(
+                self.command_assembler.set_y(self.yIncLoc), wait_completion=True
+            )
         else:
-            if((self.yIncLoc - self.incramentalMove) <= 0):
+            if (self.yIncLoc - self.incramentalMove) <= 0:
                 self.yMoveDirectionPositive = True
                 print(self.yMoveDirectionPositive)
                 self.yIncLoc = self.yIncLoc + self.incramentalMove
@@ -446,7 +490,9 @@ class AutoCalibrator:
             else:
                 self.yIncLoc = self.yIncLoc - self.incramentalMove
                 self.yLoc = self.yIncLoc
-            self._send_gcode(self.command_assembler.set_y(self.yIncLoc), wait_completion=True)
+            self._send_gcode(
+                self.command_assembler.set_y(self.yIncLoc), wait_completion=True
+            )
         # REMOVED: self._send_gcode(self.command_assembler.set_relative())
 
     def _ensure_stage_announced(self) -> None:
@@ -454,8 +500,10 @@ class AutoCalibrator:
             return
         stage = self.calibration_stages[self.stage_index]
         self._send_gcode(self.command_assembler.set_absolute())
-        #print(self.zHeight)
-        self._send_gcode(self.command_assembler.zoom_in(self.zHeight), wait_completion=True)
+        # print(self.zHeight)
+        self._send_gcode(
+            self.command_assembler.zoom_in(self.zHeight), wait_completion=True
+        )
         # REMOVED: self._send_gcode(self.command_assembler.set_relative())
         if stage == "calibrated":
             self.calibration_complete = True
@@ -468,17 +516,16 @@ class AutoCalibrator:
 
     def _advance_stage(self) -> None:
         self.zHeight -= self.zChange
-        self.zChange = (self.zHeight+70)/10
-        self.target_scale = (((100/self.zHeightStart) * (self.zHeight)) + 10)/100
+        self.zChange = (self.zHeight + 70) / 10
+        self.target_scale = (((100 / self.zHeightStart) * (self.zHeight)) + 10) / 100
         print(self.target_scale)
         self.stage_announced = False
         self.consecutive_center = 0
-        if(self.zHeight <= (self.zChange - 1)):
+        if self.zHeight <= (self.zChange - 1):
             self.calibration_complete = True
-            self.update_line(self.tag_id, self.xLoc, self.yLoc)
+            self.update_line(str(self.goalTag), self.xLoc, self.yLoc)
 
-
-    #OLD CODE
+    # OLD CODE
     # def _advance_stage(self) -> None:
     #     if self.stage_index < len(self.calibration_stages) - 1:
     #         self.stage_index += 1
@@ -489,13 +536,24 @@ class AutoCalibrator:
     #     else:
     #         self.calibration_complete = True
 
+    def _get_frame(self, url):
+        response = requests.get(url)
+        if response.status_code == 200:
+            img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            return True, img
+        else:
+            return False, None
+
 
 def main() -> None:
     calibrator = AutoCalibrator()
     while True:
-        tag_id = calibrator.communicator.wait_for_command()
-        if tag_id is not None:
-            calibrator.tag_id = int(tag_id)
+        if not calibrator.communicator.currentlyRunning():
+            time.sleep(0.1)
+        else:
+            calibrator.goalTag = calibrator.communicator.get_tag_id()
+            print(f"Goal Tag: {calibrator.goalTag}")
             calibrator.run()
 
 
